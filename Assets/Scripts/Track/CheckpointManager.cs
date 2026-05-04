@@ -68,7 +68,9 @@ public class CheckpointManager : MonoBehaviour
 
         for (int i = 0; i < positions.Count; i++)
         {
-            GameObject go = Instantiate(checkpointPrefab, positions[i], Quaternion.identity, transform);
+            GameObject go = Instantiate(checkpointPrefab, transform);
+            go.transform.position = positions[i];
+            go.transform.rotation = Quaternion.identity;
             go.name = $"Checkpoint_{i}";
 
             go.transform.localScale = Vector3.one * (visualRadiusMeters * 2f);
@@ -129,6 +131,25 @@ public class CheckpointManager : MonoBehaviour
 
     private void UpdateCheckpointHighlights()
     {
-        // use for the wayfinding system.
+        for (int i = 0; i < checkpoints.Count; i++)
+        {
+            if (checkpoints[i] == null) continue;
+            Renderer r = checkpoints[i].GetComponentInChildren<Renderer>();
+            if (r == null) continue;
+
+            // Current target: bright yellow. Others: cyan (the original color).
+            Color targetColor = (i == currentIndex) ? new Color(1f, 1f, 0f, 0.5f) : new Color(0f, 1f, 1f, 0.4f);
+            r.material.color = targetColor;
+        }
+    }
+
+    public Vector3 GetCheckpointWorldPosition(int index)
+    {
+        if (index >= 0 && index < checkpoints.Count && checkpoints[index] != null)
+        {
+            return checkpoints[index].transform.position;
+        }
+        Debug.LogWarning($"GetCheckpointWorldPosition: invalid index {index}");
+        return Vector3.zero;
     }
 }

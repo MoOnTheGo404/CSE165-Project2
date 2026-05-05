@@ -53,6 +53,22 @@ public class CheckpointManager : MonoBehaviour
         StartCoroutine(LoadAndSpawnAsync());
     }
 
+    public void RestartTrack()
+    {
+        StopAllCoroutines();
+
+        foreach (var cp in checkpoints)
+        {
+            if (cp != null)
+                Destroy(cp.gameObject);
+        }
+
+        checkpoints.Clear();
+        currentIndex = 0;
+
+        StartCoroutine(LoadAndSpawnAsync());
+    }
+
     private System.Collections.IEnumerator LoadAndSpawnAsync()
     {
         // Clear any previously-spawned checkpoints (in case of reload).

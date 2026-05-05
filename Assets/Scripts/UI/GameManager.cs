@@ -19,6 +19,9 @@ public class GameManager : MonoBehaviour
     public DroneFlightController flightController;
     public DroneCollisionDetector collisionDetector;
     public Transform droneTransform;
+    public GhostChampionManager ghostChampionManager;
+    public OVRHand leftHand;
+    public OVRHand rightHand;
 
     [Header("UI Text")]
     public TMP_Text countdownText;
@@ -40,6 +43,11 @@ public class GameManager : MonoBehaviour
     [SerializeField] private float elapsedTime = 0f;
     [SerializeField] private int lastClearedCheckpointIndex = -1; // -1 means "nothing cleared yet"
     [SerializeField] private bool anyCheckpointCleared = false;
+
+    [Header("Restart Gesture")]
+    public float restartHoldTime = 1.0f;
+    [Range(0f, 1f)] public float restartPinchThreshold = 0.7f;
+    [SerializeField] private float restartGestureProgress = 0f;
 
     public GameState State => state;
     public float ElapsedTime => elapsedTime;
@@ -102,7 +110,83 @@ public class GameManager : MonoBehaviour
                 notificationText.text = "";
             }
         }
+        HandleRestartGesture();
     }
+
+
+    private void HandleRestartGesture()
+    {
+        if (state != GameState.Finished)
+        {
+            restartGestureProgress = 0f;
+            return;
+        }
+
+        if (leftHand == null || rightHand == null || !leftHand.IsTracked || !rightHand.IsTracked)
+        {
+            restartGestureProgress = 0f;
+            return;
+        }
+
+        float leftPinch = leftHand.GetFingerPinchStrength(OVRHand.HandFinger.Index);
+        float rightPinch = rightHand.GetFingerPinchStrength(OVRHand.HandFinger.Index);
+
+        bool restartHeld = leftPinch > restartPinchThreshold && rightPinch > restartPinchThreshold;
+
+        if (restartHeld)
+        {
+            restartGestureProgress += Time.deltaTime;
+
+            if (notificationText != null)
+                notificationText.text = $"Hold both pinches to restart... {restartGestureProgress:F1}/{restartHoldTime:F1}";
+
+            if (restartGestureProgress >= restartHoldTime)
+            {
+                restartGestureProgress = 0f;
+                RestartRace();
+            }
+        }
+        else
+        {
+            restartGestureProgress = 0f;
+        }
+    }
+
+
+    public void RestartRace()
+    {
+        StopAllCoroutines();
+
+        state = GameState.PreStart;
+        elapsedTime = 0f;
+        lastClearedCheckpointIndex = -1;
+        anyCheckpointCleared = false;
+        notificationTimeRemaining = 0f;
+
+        if (flightController != null)
+        {
+            flightController.FlightEnabled = false;
+            flightController.ResetCalibration();
+        }
+
+        if (collisionDetector != null)
+            collisionDetector.enabled = false;
+
+        if (countdownText != null)
+            countdownText.text = "";
+
+        if (stopwatchText != null)
+            stopwatchText.text = "00:00.00";
+
+        if (notificationText != null)
+            notificationText.text = "Restarting...";
+
+        if (checkpointManager != null)
+            checkpointManager.RestartTrack();
+
+        StartCoroutine(RestartAfterCheckpointReload());
+    }
+
 
     private IEnumerator CacheInitialPoseAndStartCountdown()
     {
@@ -129,7 +213,13 @@ public class GameManager : MonoBehaviour
         }
 
         if (countdownText != null) countdownText.text = "GO!";
-        if (flightController != null) flightController.FlightEnabled = true;
+
+        if (ghostChampionManager != null)
+            ghostChampionManager.StartNewRun();
+
+        if (flightController != null)
+            flightController.FlightEnabled = true;
+
         state = GameState.Racing;
         yield return new WaitForSeconds(1f);
         if (countdownText != null) countdownText.text = "";
@@ -146,10 +236,13 @@ public class GameManager : MonoBehaviour
 
     private void OnTrackCompleted()
     {
+        if (ghostChampionManager != null)
+            ghostChampionManager.FinishRun();
+
         state = GameState.Finished;
         if (flightController != null) flightController.FlightEnabled = false;
         if (countdownText != null) countdownText.text = "FINISHED!";
-        if (notificationText != null) notificationText.text = $"Time: {FormatTime(elapsedTime)}";
+        if (notificationText != null) notificationText.text = $"Time: {FormatTime(elapsedTime)}\nPinch both hands to restart";
         notificationTimeRemaining = float.PositiveInfinity;
     }
 
@@ -185,6 +278,32 @@ public class GameManager : MonoBehaviour
         if (flightController != null) flightController.FlightEnabled = true;
         if (collisionDetector != null) collisionDetector.enabled = true;
         state = GameState.Racing;
+    }
+
+    private IEnumerator RestartAfterCheckpointReload()
+    {
+        // Wait until the checkpoint manager has a valid current target again.
+        while (checkpointManager != null && !checkpointManager.TryGetCurrentTargetPosition(out _))
+        {
+            yield return null;
+        }
+
+        // Wait one more frame so the drone repositioning is fully applied.
+        yield return null;
+
+        if (droneTransform != null)
+        {
+            droneInitialPosition = droneTransform.position;
+            droneInitialRotation = droneTransform.rotation;
+        }
+
+        if (collisionDetector != null)
+            collisionDetector.enabled = true;
+
+        if (notificationText != null)
+            notificationText.text = "";
+
+        StartCoroutine(RunCountdown());
     }
 
     private void ResetDroneToLastCheckpoint()

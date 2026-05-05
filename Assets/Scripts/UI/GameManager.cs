@@ -32,20 +32,24 @@ public class GameManager : MonoBehaviour
     public float crashFreezeDuration = 3f;
     [Tooltip("How long checkpoint-reached notifications stay on screen.")]
     public float notificationDuration = 1.5f;
+    [Tooltip("Vertical offset added to reset position to keep drone above terrain (meters).")]
+    public float crashRespawnVerticalOffset = 5f;
 
     [Header("Runtime State (read-only)")]
     [SerializeField] private GameState state = GameState.PreStart;
     [SerializeField] private float elapsedTime = 0f;
-    [SerializeField] private int lastClearedCheckpointIndex = 0; // We start at 0 (start position).
+    [SerializeField] private int lastClearedCheckpointIndex = -1; // -1 means "nothing cleared yet"
+    [SerializeField] private bool anyCheckpointCleared = false;
 
     public GameState State => state;
     public float ElapsedTime => elapsedTime;
 
     private float notificationTimeRemaining = 0f;
+    private Quaternion droneInitialRotation;
+    private Vector3 droneInitialPosition;
 
     private void Start()
     {
-        // Subscribe to checkpoint events.
         if (checkpointManager != null)
         {
             checkpointManager.CheckpointReached += OnCheckpointReached;
@@ -56,13 +60,14 @@ public class GameManager : MonoBehaviour
             collisionDetector.Crashed += OnDroneCrashed;
         }
 
-        // Disable flight during PreStart and Countdown.
         if (flightController != null) flightController.FlightEnabled = false;
 
         if (notificationText != null) notificationText.text = "";
         if (stopwatchText != null) stopwatchText.text = "00:00.00";
 
-        StartCoroutine(RunCountdown());
+        // Cache the initial drone pose (set by CheckpointManager) so we can reset to it
+        // if the drone crashes BEFORE clearing any checkpoints.
+        StartCoroutine(CacheInitialPoseAndStartCountdown());
     }
 
     private void OnDestroy()
@@ -91,11 +96,24 @@ public class GameManager : MonoBehaviour
         if (notificationTimeRemaining > 0f)
         {
             notificationTimeRemaining -= Time.deltaTime;
-            if (notificationTimeRemaining <= 0f && notificationText != null && state != GameState.Crashed && state != GameState.Finished)
+            if (notificationTimeRemaining <= 0f && notificationText != null
+                && state != GameState.Crashed && state != GameState.Finished)
             {
                 notificationText.text = "";
             }
         }
+    }
+
+    private IEnumerator CacheInitialPoseAndStartCountdown()
+    {
+        // Wait one frame so CheckpointManager has positioned the drone.
+        yield return null;
+        if (droneTransform != null)
+        {
+            droneInitialPosition = droneTransform.position;
+            droneInitialRotation = droneTransform.rotation;
+        }
+        StartCoroutine(RunCountdown());
     }
 
     private IEnumerator RunCountdown()
@@ -110,7 +128,6 @@ public class GameManager : MonoBehaviour
             remaining -= Time.deltaTime;
         }
 
-        // Switch to "GO!" briefly, then start racing.
         if (countdownText != null) countdownText.text = "GO!";
         if (flightController != null) flightController.FlightEnabled = true;
         state = GameState.Racing;
@@ -123,6 +140,7 @@ public class GameManager : MonoBehaviour
         if (state == GameState.Crashed || state == GameState.Finished) return;
 
         lastClearedCheckpointIndex = index;
+        anyCheckpointCleared = true;
         ShowNotification($"Checkpoint {index + 1} reached!");
     }
 
@@ -132,11 +150,13 @@ public class GameManager : MonoBehaviour
         if (flightController != null) flightController.FlightEnabled = false;
         if (countdownText != null) countdownText.text = "FINISHED!";
         if (notificationText != null) notificationText.text = $"Time: {FormatTime(elapsedTime)}";
-        notificationTimeRemaining = float.PositiveInfinity; // Keep finish message permanently.
+        notificationTimeRemaining = float.PositiveInfinity;
     }
 
     private void OnDroneCrashed()
     {
+        // Only handle crashes during active racing — ignore crashes during countdown,
+        // during another crash freeze, or after finish.
         if (state != GameState.Racing) return;
         StartCoroutine(HandleCrash());
     }
@@ -146,10 +166,12 @@ public class GameManager : MonoBehaviour
         state = GameState.Crashed;
         if (flightController != null) flightController.FlightEnabled = false;
 
-        // Move drone back to last cleared checkpoint and orient toward next checkpoint.
+        // CRITICAL: disable the collision detector during the freeze, otherwise it'll
+        // immediately detect the terrain we just respawned on top of and re-trigger a crash.
+        if (collisionDetector != null) collisionDetector.enabled = false;
+
         ResetDroneToLastCheckpoint();
 
-        // Show crash message countdown.
         float remaining = crashFreezeDuration;
         while (remaining > 0f)
         {
@@ -161,38 +183,34 @@ public class GameManager : MonoBehaviour
 
         if (notificationText != null) notificationText.text = "";
         if (flightController != null) flightController.FlightEnabled = true;
+        if (collisionDetector != null) collisionDetector.enabled = true;
         state = GameState.Racing;
     }
 
     private void ResetDroneToLastCheckpoint()
     {
-        if (droneTransform == null || checkpointManager == null) return;
+        if (droneTransform == null) return;
 
-        // Get the world position of the last cleared checkpoint, or the start position
-        // if nothing has been cleared yet (lastClearedCheckpointIndex starts at 0 = start).
         Vector3 resetPos;
-        if (lastClearedCheckpointIndex == 0)
+        Vector3 facingTarget = droneTransform.position + droneTransform.forward; // fallback
+
+        if (anyCheckpointCleared && checkpointManager != null)
         {
-            // Use the start position (track[0]) -- recompute from track data.
-            // CheckpointManager spawned a checkpoint there; we can grab its position from CurrentTargetPosition logic.
-            // Easiest: read from the manager's internal list via a helper. Since we don't have one,
-            // we just use the position of the checkpoint that's currently the target's predecessor.
-            resetPos = droneTransform.position; // Fallback (shouldn't happen often).
+            // Use the last cleared checkpoint's position.
+            resetPos = checkpointManager.GetCheckpointWorldPosition(lastClearedCheckpointIndex);
         }
         else
         {
-            // Use the public API: query the position of the last cleared checkpoint via the manager.
-            // We don't have a direct getter, so we use a small helper: get the current target,
-            // then compute the previous one via the cleared index.
-            // For now, just use whatever the current target is and back off slightly... but actually
-            // the cleanest solution is to add a helper. For simplicity here:
-            resetPos = checkpointManager.GetCheckpointWorldPosition(lastClearedCheckpointIndex);
+            // No checkpoints cleared yet — go back to the original spawn position.
+            resetPos = droneInitialPosition;
         }
 
+        // Lift the drone slightly above the reset point so it doesn't immediately re-crash.
+        resetPos.y += crashRespawnVerticalOffset;
         droneTransform.position = resetPos;
 
-        // Face the next checkpoint (per TA note).
-        if (checkpointManager.TryGetCurrentTargetPosition(out Vector3 nextPos))
+        // Face the next checkpoint per the TA's note.
+        if (checkpointManager != null && checkpointManager.TryGetCurrentTargetPosition(out Vector3 nextPos))
         {
             Vector3 toNext = nextPos - resetPos;
             toNext.y = 0f;
@@ -200,7 +218,18 @@ public class GameManager : MonoBehaviour
             {
                 droneTransform.rotation = Quaternion.LookRotation(toNext, Vector3.up);
             }
+            else
+            {
+                droneTransform.rotation = droneInitialRotation;
+            }
         }
+        else
+        {
+            droneTransform.rotation = droneInitialRotation;
+        }
+
+        // Tell the flight controller to reset its internal state (e.g., velocity smoothing).
+        if (flightController != null) flightController.ResetCalibration();
     }
 
     private void ShowNotification(string text)

@@ -56,7 +56,11 @@ public class BeaconManager : MonoBehaviour
 
     private IEnumerator InitialPlacement()
     {
-        yield return null; // wait one frame so all Start() methods finish first
+        // Wait until the CheckpointManager has loaded its track.
+        while (checkpointManager.TotalCheckpoints == 0)
+        {
+            yield return null;
+        }
         UpdateBeaconPosition();
     }
 

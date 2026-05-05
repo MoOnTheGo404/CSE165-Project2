@@ -22,6 +22,13 @@ public class CheckpointManager : MonoBehaviour
     [Tooltip("Visual sphere radius in meters (just for the visible mesh; collider uses reachRadiusMeters).")]
     public float visualRadiusMeters = 9.144f;
 
+    [Header("Drone Reference")]
+    [Tooltip("The drone Transform. Auto-positioned behind checkpoint 1 at start.")]
+    public Transform droneTransform;
+
+    [Tooltip("How far behind checkpoint 1 to spawn the drone (meters).")]
+    public float spawnBackOffsetMeters = 15f;
+
     [Header("Runtime State (read-only)")]
     [SerializeField] private int currentIndex = 0;
 
@@ -37,35 +44,46 @@ public class CheckpointManager : MonoBehaviour
 
     private void Start()
     {
-        LoadAndSpawn();
+        StartCoroutine(LoadAndSpawnAsync());
     }
 
     public void LoadAndSpawn()
     {
+        // Synchronous version — kept for backwards compatibility but should not be called on Android.
+        StartCoroutine(LoadAndSpawnAsync());
+    }
+
+    private System.Collections.IEnumerator LoadAndSpawnAsync()
+    {
+        // Clear any previously-spawned checkpoints (in case of reload).
         foreach (var cp in checkpoints)
             if (cp != null) Destroy(cp.gameObject);
         checkpoints.Clear();
         currentIndex = 0;
 
+        // Resolve which file to load.
         string path = !string.IsNullOrEmpty(externalPath)
             ? externalPath
-            : Path.Combine(Application.streamingAssetsPath, streamingAssetsFilename);
+            : System.IO.Path.Combine(Application.streamingAssetsPath, streamingAssetsFilename);
 
         Debug.Log($"CheckpointManager: loading track from {path}");
-        List<Vector3> positions = XYZParser.ParseFile(path);
 
-        if (positions.Count == 0)
+        List<Vector3> positions = null;
+        yield return XYZParser.ParseFileAsync(path, result => positions = result);
+
+        if (positions == null || positions.Count == 0)
         {
             Debug.LogError("CheckpointManager: no checkpoints loaded.");
-            return;
+            yield break;
         }
 
         if (checkpointPrefab == null)
         {
             Debug.LogError("CheckpointManager: checkpointPrefab is not assigned.");
-            return;
+            yield break;
         }
 
+        // Spawn a checkpoint GameObject for each parsed position.
         for (int i = 0; i < positions.Count; i++)
         {
             GameObject go = Instantiate(checkpointPrefab, transform);
@@ -73,13 +91,14 @@ public class CheckpointManager : MonoBehaviour
             go.transform.rotation = Quaternion.identity;
             go.name = $"Checkpoint_{i}";
 
+            // Set visual scale (sphere mesh diameter = 2 * radius).
             go.transform.localScale = Vector3.one * (visualRadiusMeters * 2f);
 
+            // Set the trigger collider radius for the reach detection.
             SphereCollider sc = go.GetComponent<SphereCollider>();
             if (sc != null)
             {
                 sc.isTrigger = true;
-
                 sc.radius = 0.5f * (reachRadiusMeters / visualRadiusMeters);
             }
 
@@ -94,21 +113,48 @@ public class CheckpointManager : MonoBehaviour
             checkpoints.Add(cp);
         }
 
+        // Initial target is checkpoint 0 (= the first sphere labeled "1"). The drone
+        // spawns behind it, so the player must fly forward through it.
+        currentIndex = 0;
+
+        // Position the drone BEHIND checkpoint 1, facing toward it (and toward checkpoint 2).
+        if (droneTransform != null && positions.Count > 1)
+        {
+            Vector3 toNext = positions[1] - positions[0];
+            toNext.y = 0f;
+            Vector3 forwardDir = toNext.sqrMagnitude > 0.0001f ? toNext.normalized : Vector3.forward;
+
+            // Spawn position: checkpoint 1 minus the forward direction times the offset.
+            droneTransform.position = positions[0] - forwardDir * spawnBackOffsetMeters;
+            droneTransform.rotation = Quaternion.LookRotation(forwardDir, Vector3.up);
+        }
+        else if (droneTransform != null && positions.Count > 0)
+        {
+            // Fallback for single-checkpoint tracks.
+            droneTransform.position = positions[0];
+            droneTransform.rotation = Quaternion.identity;
+        }
+
         Debug.Log($"CheckpointManager: spawned {checkpoints.Count} checkpoints.");
         UpdateCheckpointHighlights();
     }
 
     public void OnCheckpointEntered(Checkpoint cp)
     {
+        // Enforce order: only the current checkpoint counts.
         if (cp.Index != currentIndex) return;
 
         Debug.Log($"Checkpoint {cp.Index} reached!");
-        CheckpointReached?.Invoke(cp.Index);
 
+        // Hide the reached checkpoint.
         cp.gameObject.SetActive(false);
 
+        // Advance the pointer FIRST, so listeners querying for the next target see the right value.
         currentIndex++;
         UpdateCheckpointHighlights();
+
+        // Now fire the event so listeners (BeaconManager, etc.) refresh based on the new state.
+        CheckpointReached?.Invoke(cp.Index);
 
         if (currentIndex >= checkpoints.Count)
         {
@@ -116,7 +162,6 @@ public class CheckpointManager : MonoBehaviour
             TrackCompleted?.Invoke();
         }
     }
-
 
     public bool TryGetCurrentTargetPosition(out Vector3 worldPos)
     {

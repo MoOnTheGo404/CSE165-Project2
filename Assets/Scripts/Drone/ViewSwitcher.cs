@@ -1,5 +1,6 @@
 using UnityEngine;
 
+
 public class ViewSwitcher : MonoBehaviour
 {
     public enum ViewMode
@@ -10,30 +11,22 @@ public class ViewSwitcher : MonoBehaviour
     }
 
     [Header("References")]
-    [Tooltip("Right OVRHand (used for thumbs-up detection).")]
+    public OVRHand leftHand;
     public OVRHand rightHand;
-    [Tooltip("Right OVRSkeleton (needed to read finger bone positions for thumbs-up).")]
-    public OVRSkeleton rightSkeleton;
-    [Tooltip("The Cockpit GameObject (child of Drone). Enabled in Cockpit view.")]
     public GameObject cockpit;
-    [Tooltip("The DroneBody GameObject (child of Drone). Enabled in ThirdPerson view.")]
     public GameObject droneBody;
-    [Tooltip("The OVRCameraRig (child of Drone). Camera position is moved between views.")]
     public Transform cameraRig;
 
     [Header("Third-Person Camera Offset")]
-    [Tooltip("Offset from the drone in 3rd-person view (drone-local space). Negative Z = behind, positive Y = above.")]
     public Vector3 thirdPersonOffset = new Vector3(0f, 2f, -5f);
 
     [Header("Gesture Detection")]
-    [Tooltip("How long to hold thumbs-up before cycling (seconds).")]
-    public float gestureHoldTime = 0.6f;
-    [Tooltip("Cooldown after switching, prevents accidental rapid cycling (seconds).")]
-    public float postSwitchCooldown = 1.0f;
-    [Tooltip("How extended the thumb must be (1 = fully extended, 0 = tucked).")]
-    [Range(0f, 1f)] public float thumbExtendedThreshold = 0.7f;
-    [Tooltip("How curled the other 4 fingers must be (1 = tightly fisted, 0 = open).")]
-    [Range(0f, 1f)] public float fingersCurledThreshold = 0.6f;
+    [Tooltip("How long to hold both pinches (seconds).")]
+    public float gestureHoldTime = 1.0f;
+    [Tooltip("Cooldown after switching to prevent rapid cycling (seconds).")]
+    public float postSwitchCooldown = 1.5f;
+    [Tooltip("Pinch strength threshold for 'pinching' (1 = full pinch).")]
+    [Range(0f, 1f)] public float pinchThreshold = 0.7f;
 
     [Header("Runtime State (read-only)")]
     [SerializeField] private ViewMode currentMode = ViewMode.FirstPerson;
@@ -63,13 +56,16 @@ public class ViewSwitcher : MonoBehaviour
             return;
         }
 
-        if (rightHand == null || !rightHand.IsTracked || rightSkeleton == null)
+        if (leftHand == null || rightHand == null || !leftHand.IsTracked || !rightHand.IsTracked)
         {
             gestureProgress = 0f;
             return;
         }
 
-        bool gestureHeld = IsThumbsUp();
+        float leftPinch  = leftHand.GetFingerPinchStrength(OVRHand.HandFinger.Index);
+        float rightPinch = rightHand.GetFingerPinchStrength(OVRHand.HandFinger.Index);
+
+        bool gestureHeld = leftPinch > pinchThreshold && rightPinch > pinchThreshold;
 
         if (gestureHeld)
         {
@@ -85,30 +81,6 @@ public class ViewSwitcher : MonoBehaviour
         {
             gestureProgress = 0f;
         }
-    }
-
-    private bool IsThumbsUp()
-    {
-        // Get pinch strength for each finger. Pinch strength is high when the finger curls toward the thumb.
-        // For Index/Middle/Ring/Pinky, high pinch strength means curled (= fist).
-        float indexCurl  = rightHand.GetFingerPinchStrength(OVRHand.HandFinger.Index);
-        float middleCurl = rightHand.GetFingerPinchStrength(OVRHand.HandFinger.Middle);
-        float ringCurl   = rightHand.GetFingerPinchStrength(OVRHand.HandFinger.Ring);
-        float pinkyCurl  = rightHand.GetFingerPinchStrength(OVRHand.HandFinger.Pinky);
-
-        bool fingersCurled =
-            indexCurl  > fingersCurledThreshold &&
-            middleCurl > fingersCurledThreshold &&
-            ringCurl   > fingersCurledThreshold &&
-            pinkyCurl  > fingersCurledThreshold;
-
-        // Thumb extended: the thumb's pinch strength should be LOW (not pinching).
-        // OVRHand doesn't have a "thumb extended" measure directly, but if the thumb isn't pinching
-        // and the other fingers are curled, that's a thumbs-up.
-        float thumbCurl = rightHand.GetFingerPinchStrength(OVRHand.HandFinger.Thumb);
-        bool thumbExtended = thumbCurl < (1f - thumbExtendedThreshold);
-
-        return fingersCurled && thumbExtended;
     }
 
     private void CycleMode()

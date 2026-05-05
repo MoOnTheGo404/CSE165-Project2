@@ -1,53 +1,48 @@
 using UnityEngine;
 
+
 [RequireComponent(typeof(Rigidbody))]
 public class DroneFlightController : MonoBehaviour
 {
     [Header("Hand References")]
-    [Tooltip("OVRHand component on the LeftHandAnchor under OVRCameraRig.")]
-    public OVRHand leftHand;
-    [Tooltip("OVRHand component on the RightHandAnchor under OVRCameraRig.")]
+    [Tooltip("Right OVRHand — the only hand needed for this scheme.")]
     public OVRHand rightHand;
 
     [Header("Speed Limits")]
-    [Tooltip("Max forward/back speed (m/s).")]
-    public float maxForwardSpeed = 30f;
-    [Tooltip("Max strafe (left/right) speed (m/s).")]
-    public float maxStrafeSpeed = 15f;
-    [Tooltip("Max vertical (up/down) speed (m/s).")]
-    public float maxVerticalSpeed = 15f;
-    [Tooltip("Max yaw rate (deg/s).")]
-    public float maxYawRate = 60f;
-    [Tooltip("Speed multiplier when right hand is pinching.")]
-    public float boostMultiplier = 2f;
+    [Tooltip("Max speed (m/s). Used when pinch strength is 1.0.")]
+    public float maxSpeed = 25f;
+    [Tooltip("Speed multiplier on top of max when in 'boost' (kept for compatibility / tuning).")]
+    public float boostMultiplier = 1.5f;
+    [Tooltip("How quickly the drone smooths to its target velocity (higher = snappier).")]
+    public float velocitySmoothing = 5f;
+    [Tooltip("How quickly the drone yaws to face its flight direction (higher = snappier).")]
+    public float yawSmoothing = 3f;
 
-    [Header("Hand Input Mapping")]
-    [Tooltip("Hand displacement below this radius (meters) is ignored. Prevents jitter drift.")]
-    public float deadzoneRadius = 0.05f;
-    [Tooltip("Hand displacement at or above this distance (meters) maps to full speed on that axis.")]
-    public float maxDisplacement = 0.30f;
-
-    [Header("Calibration")]
-    [Tooltip("How long both palms must face down to capture neutral position (seconds).")]
-    public float calibrationHoldTime = 1.0f;
-    [Tooltip("Dot product threshold for 'palm facing down'. 1 = exactly down, lower = more lenient.")]
-    public float palmDownThreshold = 0.7f;
+    [Header("Input Thresholds")]
+    [Tooltip("Pinch strength must exceed this to count as throttle (filters jitter).")]
+    [Range(0f, 1f)] public float pinchDeadzone = 0.05f;
+    [Tooltip("How curled all fingers must be to register a 'fist' brake. 1 = full pinch.")]
+    [Range(0f, 1f)] public float fistThreshold = 0.7f;
 
     [Header("Runtime State (read-only)")]
-    [SerializeField] private bool isCalibrated = false;
     [SerializeField] private bool flightEnabled = true;
-    [SerializeField] private Vector3 leftHandNeutralLocal;
-    [SerializeField] private Vector3 rightHandNeutralLocal;
+    [SerializeField] private Vector3 currentVelocity;
+    [SerializeField] private float lastThrottle;
+    [SerializeField] private bool lastBraking;
 
     private Rigidbody rb;
-    private Transform centerEye;
-    private float calibrationProgress = 0f;
 
-    public bool IsCalibrated => isCalibrated;
     public bool FlightEnabled
     {
         get => flightEnabled;
-        set => flightEnabled = value;
+        set
+        {
+            flightEnabled = value;
+            if (!value)
+            {
+                currentVelocity = Vector3.zero;
+            }
+        }
     }
 
     private void Awake()
@@ -57,97 +52,77 @@ public class DroneFlightController : MonoBehaviour
         rb.useGravity = false;
     }
 
-    private void Start()
-    {
-        
-    }
-
     private void FixedUpdate()
     {
-        if (leftHand == null || rightHand == null) return;
-        if (!leftHand.IsTracked || !rightHand.IsTracked) return;
-
-        Vector3 leftLocal  = transform.InverseTransformPoint(leftHand.transform.position);
-        Vector3 rightLocal = transform.InverseTransformPoint(rightHand.transform.position);
-
-        UpdateCalibration(leftLocal, rightLocal);
-
-        if (!isCalibrated || !flightEnabled) return;
-
-        Vector3 leftDelta  = leftLocal  - leftHandNeutralLocal;
-        Vector3 rightDelta = rightLocal - rightHandNeutralLocal;
-
-        float vertInput   = MapAxis(leftDelta.y);
-        float strafeInput = MapAxis(leftDelta.x);
-
-        float forwardInput = MapAxis(rightDelta.z);
-        float yawInput     = MapAxis(rightDelta.x);
-
-        bool boosting = rightHand.GetFingerIsPinching(OVRHand.HandFinger.Index);
-        bool braking  = leftHand.GetFingerIsPinching(OVRHand.HandFinger.Index);
-
-        if (braking)
+        if (!flightEnabled || rightHand == null || !rightHand.IsTracked)
         {
+            // Decay velocity smoothly when flight disabled or hand lost.
+            currentVelocity = Vector3.Lerp(currentVelocity, Vector3.zero, velocitySmoothing * Time.fixedDeltaTime);
+            ApplyMovement();
             return;
         }
 
-        float speedMul = boosting ? boostMultiplier : 1f;
+        // Read pinch strength on each finger.
+        float indexPinch  = rightHand.GetFingerPinchStrength(OVRHand.HandFinger.Index);
+        float middlePinch = rightHand.GetFingerPinchStrength(OVRHand.HandFinger.Middle);
+        float ringPinch   = rightHand.GetFingerPinchStrength(OVRHand.HandFinger.Ring);
+        float pinkyPinch  = rightHand.GetFingerPinchStrength(OVRHand.HandFinger.Pinky);
 
-        Vector3 localVelocity = new Vector3(
-            strafeInput  * maxStrafeSpeed   * speedMul,
-            vertInput    * maxVerticalSpeed * speedMul,
-            forwardInput * maxForwardSpeed  * speedMul
-        );
+        // Fist = all four non-thumb fingers curled.
+        bool isFist =
+            indexPinch  > fistThreshold &&
+            middlePinch > fistThreshold &&
+            ringPinch   > fistThreshold &&
+            pinkyPinch  > fistThreshold;
 
-        Vector3 worldVelocity = transform.TransformDirection(localVelocity);
+        lastBraking = isFist;
 
-        rb.MovePosition(rb.position + worldVelocity * Time.fixedDeltaTime);
+        if (isFist)
+        {
+            // Brake: stop immediately.
+            currentVelocity = Vector3.zero;
+            ApplyMovement();
+            return;
+        }
 
-        float yawDelta = yawInput * maxYawRate * Time.fixedDeltaTime;
-        Quaternion yawRotation = Quaternion.Euler(0f, yawDelta, 0f);
-        rb.MoveRotation(rb.rotation * yawRotation);
+        // Throttle = right index pinch strength (the most reliable signal from OVRHand).
+        float throttle = Mathf.Max(0f, indexPinch - pinchDeadzone) / (1f - pinchDeadzone);
+        throttle = Mathf.Clamp01(throttle);
+        lastThrottle = throttle;
+
+        // Flight direction = palm forward direction.
+        // For Meta's hand convention, the right hand's palm normal is approximately the hand's -up direction.
+        // Hand forward (+Z) is the direction from wrist to fingertips; that's what we want as flight direction.
+        Vector3 palmForward = rightHand.transform.forward;
+
+        // Compute target velocity in world space.
+        Vector3 targetVelocity = palmForward.normalized * (throttle * maxSpeed);
+
+        // Smooth toward target velocity (avoids jitter).
+        currentVelocity = Vector3.Lerp(currentVelocity, targetVelocity, velocitySmoothing * Time.fixedDeltaTime);
+
+        ApplyMovement();
+        ApplyYaw(palmForward);
     }
 
-    private float MapAxis(float displacement)
+    private void ApplyMovement()
     {
-        float absD = Mathf.Abs(displacement);
-        if (absD < deadzoneRadius) return 0f;
-
-        float t = Mathf.InverseLerp(deadzoneRadius, maxDisplacement, absD);
-        return Mathf.Sign(displacement) * Mathf.Clamp01(t);
+        rb.MovePosition(rb.position + currentVelocity * Time.fixedDeltaTime);
     }
 
-    private void UpdateCalibration(Vector3 leftLocal, Vector3 rightLocal)
+    private void ApplyYaw(Vector3 desiredForward)
     {
-        Vector3 leftPalmDir  = -leftHand.transform.up;
-        Vector3 rightPalmDir = -rightHand.transform.up;
+        // Drone yaws (around world Y) to face the hand's horizontal direction.
+        Vector3 horizontalForward = desiredForward;
+        horizontalForward.y = 0f;
+        if (horizontalForward.sqrMagnitude < 0.0001f) return;
 
-        float leftDot  = Vector3.Dot(leftPalmDir,  Vector3.down);
-        float rightDot = Vector3.Dot(rightPalmDir, Vector3.down);
-
-        bool gestureActive = leftDot > palmDownThreshold && rightDot > palmDownThreshold;
-
-        if (gestureActive)
-        {
-            calibrationProgress += Time.fixedDeltaTime;
-            if (calibrationProgress >= calibrationHoldTime)
-            {
-                leftHandNeutralLocal  = leftLocal;
-                rightHandNeutralLocal = rightLocal;
-                isCalibrated = true;
-                calibrationProgress = 0f;
-                Debug.Log("Drone flight: calibrated. Left=" + leftHandNeutralLocal + " Right=" + rightHandNeutralLocal);
-            }
-        }
-        else
-        {
-            calibrationProgress = 0f;
-        }
+        Quaternion targetRotation = Quaternion.LookRotation(horizontalForward, Vector3.up);
+        rb.MoveRotation(Quaternion.Slerp(rb.rotation, targetRotation, yawSmoothing * Time.fixedDeltaTime));
     }
 
     public void ResetCalibration()
     {
-        isCalibrated = false;
-        calibrationProgress = 0f;
+        currentVelocity = Vector3.zero;
     }
 }

@@ -32,6 +32,10 @@ public class DroneAudioManager : MonoBehaviour
     public AudioClip waypointBeepClip;
     public float waypointBeepInterval = 1.0f;
 
+    [Header("Countdown Timing")]
+    public float countdownSoundLeadTime = 3f;
+    private Coroutine countdownRoutine;
+
     private Vector3 lastDronePosition;
     private float currentSpeed;
     private float beepTimer;
@@ -155,7 +159,10 @@ public class DroneAudioManager : MonoBehaviour
 
         if (currentState == GameManager.GameState.Countdown)
         {
-            PlaySfx(countdownClip);
+            if (countdownRoutine != null)
+                StopCoroutine(countdownRoutine);
+
+            countdownRoutine = StartCoroutine(PlayCountdownAligned());
         }
         else if (currentState == GameManager.GameState.Crashed)
         {
@@ -163,6 +170,20 @@ public class DroneAudioManager : MonoBehaviour
         }
 
         lastState = currentState;
+    }
+
+    private IEnumerator PlayCountdownAligned()
+    {
+        if (gameManager == null || countdownClip == null)
+            yield break;
+
+        // Example: game countdown = 5 sec, sound is 3 sec, so wait 2 sec.
+        float waitTime = Mathf.Max(0f, gameManager.countdownDuration - countdownSoundLeadTime);
+
+        yield return new WaitForSeconds(waitTime);
+
+        if (gameManager.State == GameManager.GameState.Countdown)
+            PlaySfx(countdownClip);
     }
 
     private void UpdateWaypointSpatialAudio()

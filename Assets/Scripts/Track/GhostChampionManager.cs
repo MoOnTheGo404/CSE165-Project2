@@ -34,6 +34,9 @@ public class GhostChampionManager : MonoBehaviour
     [SerializeField] private int currentFrameCount = 0;
     [SerializeField] private int bestFrameCount = 0;
 
+    [Header("Startup Options")]
+    public bool clearSavedGhostOnStartup = true;
+
     private GhostRun currentRun = new GhostRun();
     private GhostRun bestRun = new GhostRun();
 
@@ -44,8 +47,17 @@ public class GhostChampionManager : MonoBehaviour
     {
         savePath = Path.Combine(Application.persistentDataPath, "ghost_best_run.json");
 
+        if (clearSavedGhostOnStartup && File.Exists(savePath))
+        {
+            File.Delete(savePath);
+            Debug.Log("GhostChampion: cleared saved ghost on startup.");
+        }
+
         if (ghostVisual != null)
+        {
+            DisableGhostPhysics();
             ghostVisual.SetActive(false);
+        }
 
         LoadBestRun();
     }
@@ -65,6 +77,27 @@ public class GhostChampionManager : MonoBehaviour
             if (ghostVisual != null)
                 ghostVisual.SetActive(false);
         }
+    }
+
+    private void DisableGhostPhysics()
+    {
+        if (ghostVisual == null) return;
+
+        Collider[] colliders = ghostVisual.GetComponentsInChildren<Collider>(true);
+        foreach (Collider col in colliders)
+        {
+            col.enabled = false;
+        }
+
+        Rigidbody[] rigidbodies = ghostVisual.GetComponentsInChildren<Rigidbody>(true);
+        foreach (Rigidbody rb in rigidbodies)
+        {
+            rb.isKinematic = true;
+            rb.detectCollisions = false;
+            rb.useGravity = false;
+        }
+
+        Debug.Log($"GhostChampion: disabled {colliders.Length} ghost colliders and {rigidbodies.Length} ghost rigidbodies.");
     }
 
     public void StartNewRun()

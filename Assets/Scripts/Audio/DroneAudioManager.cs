@@ -7,6 +7,7 @@ public class DroneAudioManager : MonoBehaviour
     public GameManager gameManager;
     public CheckpointManager checkpointManager;
     public Transform droneTransform;
+    public BeaconManager beaconManager;
 
     [Header("Visual Wayfinding To Disable During Spatial Audio Mode")]
     public GameObject wayfindingArrowObject;
@@ -32,6 +33,10 @@ public class DroneAudioManager : MonoBehaviour
     public AudioClip waypointBeepClip;
     public float waypointBeepInterval = 1.0f;
 
+    [Header("Wayfinding EC Toggle")]
+    public KeyCode toggleSpatialAudioKey = KeyCode.T;
+    private bool lastSpatialAudioMode;
+
     [Header("Countdown Timing")]
     public float countdownSoundLeadTime = 3f;
     private Coroutine countdownRoutine;
@@ -55,6 +60,7 @@ public class DroneAudioManager : MonoBehaviour
         SetupMotorAudio();
         SetupSpatialAudio();
         ApplySpatialAudioMode();
+        lastSpatialAudioMode = spatialAudioMode;
 
         if (gameManager != null)
             lastState = gameManager.State;
@@ -71,6 +77,8 @@ public class DroneAudioManager : MonoBehaviour
 
     private void Update()
     {
+        HandleSpatialAudioToggle();
+
         UpdateDroneSpeed();
         UpdateMotorAudio();
         UpdateStateSounds();
@@ -103,15 +111,46 @@ public class DroneAudioManager : MonoBehaviour
         waypointSpatialSource.maxDistance = 200f;
     }
 
-    private void ApplySpatialAudioMode()
+   private void ApplySpatialAudioMode()
     {
-        // Assignment says spatial audio mode must disable visual wayfinding aids,
-        // except the waypoint visuals themselves.
+        // Wayfinding EC ON:
+        // spatial audio ON, visual wayfinding OFF.
+        // Wayfinding EC OFF:
+        // spatial audio OFF, visual wayfinding ON.
+        bool visualWayfindingEnabled = !spatialAudioMode;
+
         if (wayfindingArrowObject != null)
-            wayfindingArrowObject.SetActive(!spatialAudioMode);
+            wayfindingArrowObject.SetActive(visualWayfindingEnabled);
 
         if (beaconObject != null)
-            beaconObject.SetActive(!spatialAudioMode);
+            beaconObject.SetActive(visualWayfindingEnabled);
+
+        if (beaconManager != null)
+            beaconManager.SetBeaconVisible(visualWayfindingEnabled);
+
+        if (waypointSpatialSource != null)
+        {
+            waypointSpatialSource.Stop();
+            waypointSpatialSource.enabled = spatialAudioMode;
+        }
+
+        Debug.Log($"Wayfinding EC mode: {(spatialAudioMode ? "ON - spatial audio, visuals hidden" : "OFF - visual arrow/beacon, spatial audio hidden")}");
+    }
+
+    private void HandleSpatialAudioToggle()
+    {
+        // Keyboard toggle for editor/laptop testing.
+        if (Input.GetKeyDown(toggleSpatialAudioKey))
+        {
+            SetSpatialAudioMode(!spatialAudioMode);
+        }
+
+        // Also allow live Inspector checkbox changes to apply immediately.
+        if (spatialAudioMode != lastSpatialAudioMode)
+        {
+            ApplySpatialAudioMode();
+            lastSpatialAudioMode = spatialAudioMode;
+        }
     }
 
     private void UpdateDroneSpeed()
@@ -225,5 +264,6 @@ public class DroneAudioManager : MonoBehaviour
     {
         spatialAudioMode = enabled;
         ApplySpatialAudioMode();
+        lastSpatialAudioMode = spatialAudioMode;
     }
 }

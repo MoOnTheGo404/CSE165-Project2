@@ -94,4 +94,9 @@ public class BeaconManager : MonoBehaviour
         beaconInstance.transform.position = placement;
         beaconInstance.transform.rotation = Quaternion.identity;
     }
+    public void SetBeaconVisible(bool visible)
+    {
+        if (beaconInstance != null)
+            beaconInstance.SetActive(visible);
+    }
 }

@@ -1951,7 +1951,7 @@ MonoBehaviour:
   countdownText: {fileID: 1762202803}
   stopwatchText: {fileID: 39684845}
   notificationText: {fileID: 1670780325}
-  countdownDuration: 5
+  countdownDuration: 3
   crashFreezeDuration: 3
   notificationDuration: 1.5
   crashRespawnVerticalOffset: 5
@@ -2920,9 +2920,8 @@ MonoBehaviour:
   gameManager: {fileID: 1438896777}
   checkpointManager: {fileID: 1488597051}
   droneTransform: {fileID: 630705746}
-  beaconManager: {fileID: 239073448}
   wayfindingArrowObject: {fileID: 1900886753}
-  beaconObject: {fileID: 0}
+  beaconObject: {fileID: 239073447}
   motorSource: {fileID: 529637625}
   motorLoopClip: {fileID: 8300000, guid: 77330eb89d1031d4180177075aaa477b, type: 3}
   minMotorPitch: 0.7
@@ -2937,8 +2936,6 @@ MonoBehaviour:
   waypointSpatialSource: {fileID: 2024947091}
   waypointBeepClip: {fileID: 8300000, guid: a0c5a299b83567347b70603577f227d0, type: 3}
   waypointBeepInterval: 1
-  toggleSpatialAudioKey: 116
-  countdownSoundLeadTime: 3
 --- !u!4 &1895536298
 Transform:
   m_ObjectHideFlags: 0

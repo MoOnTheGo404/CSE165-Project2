@@ -7,7 +7,6 @@ public class DroneAudioManager : MonoBehaviour
     public GameManager gameManager;
     public CheckpointManager checkpointManager;
     public Transform droneTransform;
-    public BeaconManager beaconManager;
 
     [Header("Visual Wayfinding To Disable During Spatial Audio Mode")]
     public GameObject wayfindingArrowObject;
@@ -33,14 +32,6 @@ public class DroneAudioManager : MonoBehaviour
     public AudioClip waypointBeepClip;
     public float waypointBeepInterval = 1.0f;
 
-    [Header("Wayfinding EC Toggle")]
-    public KeyCode toggleSpatialAudioKey = KeyCode.T;
-    private bool lastSpatialAudioMode;
-
-    [Header("Countdown Timing")]
-    public float countdownSoundLeadTime = 3f;
-    private Coroutine countdownRoutine;
-
     private Vector3 lastDronePosition;
     private float currentSpeed;
     private float beepTimer;
@@ -60,7 +51,6 @@ public class DroneAudioManager : MonoBehaviour
         SetupMotorAudio();
         SetupSpatialAudio();
         ApplySpatialAudioMode();
-        lastSpatialAudioMode = spatialAudioMode;
 
         if (gameManager != null)
             lastState = gameManager.State;
@@ -77,8 +67,6 @@ public class DroneAudioManager : MonoBehaviour
 
     private void Update()
     {
-        HandleSpatialAudioToggle();
-
         UpdateDroneSpeed();
         UpdateMotorAudio();
         UpdateStateSounds();
@@ -111,46 +99,15 @@ public class DroneAudioManager : MonoBehaviour
         waypointSpatialSource.maxDistance = 200f;
     }
 
-   private void ApplySpatialAudioMode()
+    private void ApplySpatialAudioMode()
     {
-        // Wayfinding EC ON:
-        // spatial audio ON, visual wayfinding OFF.
-        // Wayfinding EC OFF:
-        // spatial audio OFF, visual wayfinding ON.
-        bool visualWayfindingEnabled = !spatialAudioMode;
-
+        // Assignment says spatial audio mode must disable visual wayfinding aids,
+        // except the waypoint visuals themselves.
         if (wayfindingArrowObject != null)
-            wayfindingArrowObject.SetActive(visualWayfindingEnabled);
+            wayfindingArrowObject.SetActive(!spatialAudioMode);
 
         if (beaconObject != null)
-            beaconObject.SetActive(visualWayfindingEnabled);
-
-        if (beaconManager != null)
-            beaconManager.SetBeaconVisible(visualWayfindingEnabled);
-
-        if (waypointSpatialSource != null)
-        {
-            waypointSpatialSource.Stop();
-            waypointSpatialSource.enabled = spatialAudioMode;
-        }
-
-        Debug.Log($"Wayfinding EC mode: {(spatialAudioMode ? "ON - spatial audio, visuals hidden" : "OFF - visual arrow/beacon, spatial audio hidden")}");
-    }
-
-    private void HandleSpatialAudioToggle()
-    {
-        // Keyboard toggle for editor/laptop testing.
-        if (Input.GetKeyDown(toggleSpatialAudioKey))
-        {
-            SetSpatialAudioMode(!spatialAudioMode);
-        }
-
-        // Also allow live Inspector checkbox changes to apply immediately.
-        if (spatialAudioMode != lastSpatialAudioMode)
-        {
-            ApplySpatialAudioMode();
-            lastSpatialAudioMode = spatialAudioMode;
-        }
+            beaconObject.SetActive(!spatialAudioMode);
     }
 
     private void UpdateDroneSpeed()
@@ -198,10 +155,7 @@ public class DroneAudioManager : MonoBehaviour
 
         if (currentState == GameManager.GameState.Countdown)
         {
-            if (countdownRoutine != null)
-                StopCoroutine(countdownRoutine);
-
-            countdownRoutine = StartCoroutine(PlayCountdownAligned());
+            PlaySfx(countdownClip);
         }
         else if (currentState == GameManager.GameState.Crashed)
         {
@@ -209,20 +163,6 @@ public class DroneAudioManager : MonoBehaviour
         }
 
         lastState = currentState;
-    }
-
-    private IEnumerator PlayCountdownAligned()
-    {
-        if (gameManager == null || countdownClip == null)
-            yield break;
-
-        // Example: game countdown = 5 sec, sound is 3 sec, so wait 2 sec.
-        float waitTime = Mathf.Max(0f, gameManager.countdownDuration - countdownSoundLeadTime);
-
-        yield return new WaitForSeconds(waitTime);
-
-        if (gameManager.State == GameManager.GameState.Countdown)
-            PlaySfx(countdownClip);
     }
 
     private void UpdateWaypointSpatialAudio()
@@ -264,6 +204,5 @@ public class DroneAudioManager : MonoBehaviour
     {
         spatialAudioMode = enabled;
         ApplySpatialAudioMode();
-        lastSpatialAudioMode = spatialAudioMode;
     }
 }

@@ -16,6 +16,7 @@ public class BeaconManager : MonoBehaviour
     public bool hideWhenComplete = true;
 
     private GameObject beaconInstance;
+    private bool beaconVisible = true;
 
     private void Start()
     {
@@ -80,6 +81,13 @@ public class BeaconManager : MonoBehaviour
     private void UpdateBeaconPosition()
     {
         if (beaconInstance == null) return;
+
+        if (!beaconVisible)
+        {
+            beaconInstance.SetActive(false);
+            return;
+        }
+
         if (!checkpointManager.TryGetCurrentTargetPosition(out Vector3 targetPos))
         {
             beaconInstance.SetActive(false);
@@ -87,16 +95,28 @@ public class BeaconManager : MonoBehaviour
         }
 
         beaconInstance.SetActive(true);
-        // Offset vertically so the beacon's vertical center is below the checkpoint;
-        // its top extends well above the checkpoint for easy visibility.
+
         Vector3 placement = targetPos;
         placement.y += verticalOffset;
         beaconInstance.transform.position = placement;
         beaconInstance.transform.rotation = Quaternion.identity;
     }
+
+
     public void SetBeaconVisible(bool visible)
     {
+        beaconVisible = visible;
+
         if (beaconInstance != null)
-            beaconInstance.SetActive(visible);
+        {
+            if (!visible)
+            {
+                beaconInstance.SetActive(false);
+            }
+            else
+            {
+                UpdateBeaconPosition();
+            }
+        }
     }
 }

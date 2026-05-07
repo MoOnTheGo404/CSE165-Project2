@@ -34,6 +34,8 @@ public class GhostChampionManager : MonoBehaviour
     [SerializeField] private int currentFrameCount = 0;
     [SerializeField] private int bestFrameCount = 0;
 
+    public bool HasBestRun => hasBestRun;
+
     [Header("Startup Options")]
     public bool clearSavedGhostOnStartup = true;
 

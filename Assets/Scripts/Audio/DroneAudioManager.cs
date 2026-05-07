@@ -7,6 +7,8 @@ public class DroneAudioManager : MonoBehaviour
     public GameManager gameManager;
     public CheckpointManager checkpointManager;
     public Transform droneTransform;
+    public BeaconManager beaconManager;
+    public GhostChampionManager ghostChampionManager;
 
     [Header("Visual Wayfinding To Disable During Spatial Audio Mode")]
     public GameObject wayfindingArrowObject;
@@ -27,15 +29,21 @@ public class DroneAudioManager : MonoBehaviour
     public AudioClip finishClip;
 
     [Header("Spatial Waypoint Audio")]
-    public bool spatialAudioMode = true;
+    [Tooltip("Manual spatial mode. Only used if Spatial Audio Only During Ghost Runs is unchecked.")]
+    public bool spatialAudioMode = false;
     public AudioSource waypointSpatialSource;
     public AudioClip waypointBeepClip;
     public float waypointBeepInterval = 1.0f;
+
+    [Header("Ghost Run Wayfinding Mode")]
+    [Tooltip("If checked: first run uses visual arrow/beacon, ghost run uses spatial audio.")]
+    public bool spatialAudioOnlyDuringGhostRuns = true;
 
     private Vector3 lastDronePosition;
     private float currentSpeed;
     private float beepTimer;
     private GameManager.GameState lastState;
+    private bool currentSpatialWayfindingEnabled = false;
 
     private void Start()
     {
@@ -67,6 +75,8 @@ public class DroneAudioManager : MonoBehaviour
 
     private void Update()
     {
+        ApplySpatialAudioMode();
+
         UpdateDroneSpeed();
         UpdateMotorAudio();
         UpdateStateSounds();
@@ -80,6 +90,9 @@ public class DroneAudioManager : MonoBehaviour
         motorSource.clip = motorLoopClip;
         motorSource.loop = true;
         motorSource.playOnAwake = false;
+        motorSource.spatialBlend = 0f;
+        motorSource.volume = 0f;
+        motorSource.pitch = minMotorPitch;
 
         if (!motorSource.isPlaying)
             motorSource.Play();
@@ -91,23 +104,54 @@ public class DroneAudioManager : MonoBehaviour
 
         waypointSpatialSource.loop = false;
         waypointSpatialSource.playOnAwake = false;
-
-        // Full 3D spatial audio.
         waypointSpatialSource.spatialBlend = 1f;
         waypointSpatialSource.rolloffMode = AudioRolloffMode.Logarithmic;
         waypointSpatialSource.minDistance = 5f;
-        waypointSpatialSource.maxDistance = 200f;
+        waypointSpatialSource.maxDistance = 2000f;
+        waypointSpatialSource.volume = 1f;
     }
 
     private void ApplySpatialAudioMode()
     {
-        // Assignment says spatial audio mode must disable visual wayfinding aids,
-        // except the waypoint visuals themselves.
+        bool spatialEnabled = ShouldUseSpatialWayfinding();
+        currentSpatialWayfindingEnabled = spatialEnabled;
+
+        bool visualWayfindingEnabled = !spatialEnabled;
+
         if (wayfindingArrowObject != null)
-            wayfindingArrowObject.SetActive(!spatialAudioMode);
+            wayfindingArrowObject.SetActive(visualWayfindingEnabled);
 
         if (beaconObject != null)
-            beaconObject.SetActive(!spatialAudioMode);
+            beaconObject.SetActive(visualWayfindingEnabled);
+
+        if (beaconManager != null)
+            beaconManager.SetBeaconVisible(visualWayfindingEnabled);
+
+        if (waypointSpatialSource != null)
+        {
+            waypointSpatialSource.enabled = spatialEnabled;
+
+            if (!spatialEnabled)
+                waypointSpatialSource.Stop();
+        }
+    }
+
+    private bool ShouldUseSpatialWayfinding()
+    {
+        if (!spatialAudioOnlyDuringGhostRuns)
+            return spatialAudioMode;
+
+        if (ghostChampionManager == null || gameManager == null)
+            return false;
+
+        bool hasGhost = ghostChampionManager.HasBestRun;
+
+        bool inActiveRun =
+            gameManager.State == GameManager.GameState.Countdown ||
+            gameManager.State == GameManager.GameState.Racing ||
+            gameManager.State == GameManager.GameState.Crashed;
+
+        return hasGhost && inActiveRun;
     }
 
     private void UpdateDroneSpeed()
@@ -167,7 +211,7 @@ public class DroneAudioManager : MonoBehaviour
 
     private void UpdateWaypointSpatialAudio()
     {
-        if (!spatialAudioMode) return;
+        if (!currentSpatialWayfindingEnabled) return;
         if (checkpointManager == null || waypointSpatialSource == null || waypointBeepClip == null) return;
         if (gameManager == null || gameManager.State != GameManager.GameState.Racing) return;
 

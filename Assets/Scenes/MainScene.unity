@@ -1442,6 +1442,7 @@ MonoBehaviour:
   bestTime: 0
   currentFrameCount: 0
   bestFrameCount: 0
+  clearSavedGhostOnStartup: 1
 --- !u!4 &626055474
 Transform:
   m_ObjectHideFlags: 0
@@ -2919,6 +2920,7 @@ MonoBehaviour:
   gameManager: {fileID: 1438896777}
   checkpointManager: {fileID: 1488597051}
   droneTransform: {fileID: 630705746}
+  beaconManager: {fileID: 239073448}
   wayfindingArrowObject: {fileID: 1900886753}
   beaconObject: {fileID: 0}
   motorSource: {fileID: 529637625}
@@ -2935,6 +2937,8 @@ MonoBehaviour:
   waypointSpatialSource: {fileID: 2024947091}
   waypointBeepClip: {fileID: 8300000, guid: a0c5a299b83567347b70603577f227d0, type: 3}
   waypointBeepInterval: 1
+  toggleSpatialAudioKey: 116
+  countdownSoundLeadTime: 3
 --- !u!4 &1895536298
 Transform:
   m_ObjectHideFlags: 0
@@ -3017,7 +3021,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 3aae77e7dea9d409593c9f7f1a9b56d5, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::CameraRelativeUI
-  offsetFromCamera: {x: 0, y: -0.4, z: 1.5}
+  offsetFromCamera: {x: 0, y: -0.15, z: 1.7}
   billboard: 0
   positionSmoothing: 10
 --- !u!1 &1932999868
